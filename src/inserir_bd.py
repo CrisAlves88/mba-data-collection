@@ -6,11 +6,11 @@ from minio import Minio
 from minio.error import S3Error
 
 # --- 1. CONFIGURAÇÃO DA CONEXÃO SQL (AJUSTE OS VALORES!) ---
-JDBC_HOSTNAME = "seu_host_do_banco_loja"
+JDBC_HOSTNAME = "db"
 JDBC_PORT = 5432
-JDBC_DATABASE = "db_loja"
-JDBC_USER = "seu_usuario_db"
-JDBC_PASSWORD = "sua_senha_db"
+JDBC_DATABASE = "mydb"
+JDBC_USER = "myuser"
+JDBC_PASSWORD = "mypassword"
 
 JDBC_DRIVER = "org.postgresql.Driver" 
 JDBC_URL = f"jdbc:postgresql://{JDBC_HOSTNAME}:{JDBC_PORT}/{JDBC_DATABASE}" 
@@ -49,7 +49,7 @@ def ingest_full_load(spark_session: SparkSession, table_name: str, target_base_p
     e salva no MinIO no formato Parquet.
     """
     # A variável BUCKET_NAME é acessada aqui porque é global.
-    global BUCKET_NAME 
+    #global BUCKET_NAME 
     
     print(f"\n--- INICIANDO INGESTÃO FULL LOAD: {table_name} ---")
 
