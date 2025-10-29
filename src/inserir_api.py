@@ -1,63 +1,100 @@
-# -- coding: utf-8 --
-"""
-Ingestão da API BrasilAPI (IBGE UF) para a camada Bronze no MinIO.
-"""
-
-import requests
-from datetime import datetime
-from minio import Minio
-from io import BytesIO
 import json
+import io
+import datetime
+import time
+import requests # <- Adicionamos a biblioteca requests para chamadas HTTP
+from minio import Minio
+from minio.error import S3Error
 
-# === CONFIGURAÇÕES ===
-API_URL = "https://brasilapi.com.br/api/ibge/uf/v1"
-BUCKET_NAME = "raw"
-BRONZE_PREFIX = "api/ibge_uf"
-
-# Conexão MinIO
+# --- 1. CONFIGURAÇÃO DO MINIO ---
 MINIO_ENDPOINT = "minio:9000"
-ACCESS_KEY = "minioadmin"
-SECRET_KEY = "minioadmin"
-SECURE = False
+MINIO_ACCESS_KEY = "minioadmin"
+MINIO_SECRET_KEY = "minioadmin"
+MINIO_SECURE = False
 
-# === CONECTAR AO MINIO ===
-client = Minio(
-    MINIO_ENDPOINT,
-    access_key=ACCESS_KEY,
-    secret_key=SECRET_KEY,
-    secure=SECURE
-)
+# --- 2. CONFIGURAÇÃO DA API E DESTINO ---
+API_URL = "https://brasilapi.com.br/api/ibge/uf/v1"
 
-if not client.bucket_exists(BUCKET_NAME):
-    client.make_bucket(BUCKET_NAME)
-    print(f"Bucket '{BUCKET_NAME}' criado.")
-else:
-    print(f"Bucket '{BUCKET_NAME}' já existe.")
+# Destino no MinIO
+BUCKET_NAME = "bronze"
+PREFIXO_MINIO = "api/ibge_uf/" # Nova pasta para dados de API
+BASE_OBJECT_NAME = "ibge_uf_data" # Nome base do arquivo antes do timestamp
+CONTENT_TYPE = "application/json"
 
-# === FAZER REQUISIÇÃO HTTP ===
-print(f"Requisitando dados da API: {API_URL}")
-response = requests.get(API_URL)
+def get_unique_timestamp():
+    """Gera um timestamp único e preciso (ano, mês, dia, hora, minuto, segundo, microssegundo)."""
+    agora = datetime.datetime.now()
+    # Formato: YYYYMMDD_HHMMSS_microseconds
+    return agora.strftime('%Y%m%d_%H%M%S') #+ str(int(time.time() * 1000) % 1000000)
 
-if response.status_code != 200:
-    raise Exception(f"Erro ao acessar API: {response.status_code}")
+def fetch_and_upload_api_data():
+    """
+    Busca dados de uma API, gera um nome de objeto único com timestamp
+    e faz o upload do JSON para o MinIO.
+    """
+    try:
+        # --- 3. REQUISIÇÃO À API ---
+        print(f"Buscando dados da API: {API_URL}")
+        
+        # Faz a requisição GET
+        response = requests.get(API_URL)
+        response.raise_for_status() # Lança exceção para códigos de erro HTTP (4xx ou 5xx)
+        
+        # Converte a resposta (JSON) em um objeto Python
+        api_data = response.json()
+        print("Dados da API recebidos com sucesso.")
+        
+        # --- 4. CONFIGURAÇÃO MINIO E BUCKET ---
+        client = Minio(
+            MINIO_ENDPOINT,
+            access_key=MINIO_ACCESS_KEY,
+            secret_key=MINIO_SECRET_KEY,
+            secure=MINIO_SECURE
+        )
 
-data = response.json()
-print(f"{len(data)} registros recebidos da API BrasilAPI (IBGE UF).")
+        if not client.bucket_exists(BUCKET_NAME):
+            client.make_bucket(BUCKET_NAME)
+            print(f"Bucket '{BUCKET_NAME}' criado com sucesso.")
+        else:
+            print(f"Bucket '{BUCKET_NAME}' já existe.")
 
-# === SALVAR NO MINIO ===
-date_str = datetime.now().strftime("%Y-%m-%d")
-base_path = f"{BRONZE_PREFIX}/data_ingestao={date_str}/"
-object_name = f"{base_path}uf.json"
+        # --- 5. PREPARAÇÃO DO OBJETO ÚNICO ---
+        timestamp_unico = get_unique_timestamp()
+        
+        # Monta o nome final do objeto: api/ibge_uf/ibge_uf_data_TIMESTAMP.json
+        object_name = f"{PREFIXO_MINIO}{BASE_OBJECT_NAME}_{timestamp_unico}.json"
 
-json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+        # Serializa o objeto Python (lista/dict) para uma string JSON e codifica em bytes
+        json_string = json.dumps(api_data, indent=2, ensure_ascii=False)
+        json_bytes = json_string.encode('utf-8')
+        
+        # Cria o stream de bytes
+        json_stream = io.BytesIO(json_bytes)
+        data_length = len(json_bytes)
 
-client.put_object(
-    BUCKET_NAME,
-    object_name,
-    BytesIO(json_bytes),
-    length=len(json_bytes),
-    content_type="application/json"
-)
+        # --- 6. FAZ O UPLOAD ---
+        print(f"Iniciando upload do objeto único '{object_name}'...")
 
-print(f"Arquivo enviado para o MinIO -> {object_name}")
-print("Ingestão da API concluída com sucesso!")
+        result = client.put_object(
+            bucket_name=BUCKET_NAME,
+            object_name=object_name,
+            data=json_stream,
+            length=data_length,
+            content_type=CONTENT_TYPE
+        )
+
+        print("\n--- INGESTÃO DE API CONCLUÍDA ---")
+        print(f"Objeto Salvo: {result.object_name}")
+        print(f"Localização: {BUCKET_NAME}/{object_name}")
+
+    except requests.exceptions.HTTPError as errh:
+        print(f"Erro HTTP ao acessar a API: {errh}")
+    except requests.exceptions.ConnectionError as errc:
+        print(f"Erro de Conexão: {errc}")
+    except S3Error as err_minio:
+        print(f"Erro ao interagir com o MinIO: {err_minio}")
+    except Exception as e:
+        print(f"Ocorreu um erro inesperado: {e}")
+
+if __name__ == "__main__":
+    fetch_and_upload_api_data()

@@ -1,28 +1,40 @@
 import json
 import io
+import os
 import datetime
+import time # Adicionado para garantir um timestamp único
 from minio import Minio
 from minio.error import S3Error
 
 # --- 1. CONFIGURAÇÃO DO MINIO ---
-# ATENÇÃO: Substitua estes valores pelos seus dados de conexão!
-MINIO_ENDPOINT = "minio:9000"  # Exemplo: "192.168.1.10:9000"
+MINIO_ENDPOINT = "minio:9000"
 MINIO_ACCESS_KEY = "minioadmin"
 MINIO_SECRET_KEY = "minioadmin"
 MINIO_SECURE = False  # Use True se estiver usando HTTPS/SSL
-LOCAL_FOLDER = "/workspace/json"  # caminho real no teu Codespace
 
-# --- 2. DADOS DO BUCKET E DO OBJETO JSON ---
-agora = datetime.datetime.now()
-timestamp_formatado = agora.strftime('%d%m%y%H%M')
-
-BUCKET_NAME = "raw"
-OBJECT_NAME = "json/dados_extrato_" + timestamp_formatado + "_.json"  # O nome que o arquivo terá no MinIO
+# --- 2. DADOS DO BUCKET E DO DIRETÓRIO ---
+LOCAL_FOLDER = "/workspace/json"  # Onde estão os arquivos JSON
+BUCKET_NAME = "bronze"
+PREFIXO_MINIO = "json/"  # Prefixo/pasta dentro do bucket
 CONTENT_TYPE = "application/json"
-DATA_JSON =  "/workspace/json"
 
-def upload_json_to_minio():
-    """Conecta ao MinIO, garante que o bucket exista e faz o upload do objeto JSON."""
+def get_unique_timestamp():
+    """Gera um timestamp único e preciso (dia, mês, ano, hora, minuto, segundo, microssegundo)"""
+    # Usamos time.time() para microssegundos, o que é mais seguro contra colisões rápidas.
+    agora = datetime.datetime.now()
+    # Formato completo: DDMMYY_HHMMSS
+    return agora.strftime('%Y%m%d_%H%M%S')
+
+def upload_json_files_to_minio_unique():
+    """
+    Conecta ao MinIO e faz o upload de todos os arquivos JSON do diretório local,
+    garantindo que o nome do objeto seja único e não haja sobrescrita.
+    """
+    
+    if not os.path.isdir(LOCAL_FOLDER):
+        print(f"ERRO: O diretório '{LOCAL_FOLDER}' não existe ou não é acessível.")
+        return
+
     try:
         # Inicializa o cliente MinIO
         client = Minio(
@@ -39,36 +51,57 @@ def upload_json_to_minio():
         else:
             print(f"Bucket '{BUCKET_NAME}' já existe.")
 
-        # --- 4. CONVERTE O OBJETO JSON EM BYTES ---
-        # Serializa o objeto Python (dict) para uma string JSON formatada (indent=2)
-        json_string = json.dumps(DATA_JSON, indent=2)
-        # Codifica a string JSON em bytes (necessário para o put_object)
-        json_bytes = json_string.encode('utf-8')
-        # Cria um stream de bytes (BytesIO)
-        json_stream = io.BytesIO(json_bytes)
-        # Obtém o tamanho dos dados
-        data_length = len(json_bytes)
+        # --- 4. Itera sobre os arquivos no diretório local ---
+        uploaded_count = 0
+        
+        for filename in os.listdir(LOCAL_FOLDER):
+            if filename.endswith(".json"):
+                local_file_path = os.path.join(LOCAL_FOLDER, filename)
+                
+                # --- GERAÇÃO DO NOME DO OBJETO ÚNICO ---
+                # 1. Obtém a parte principal do nome do arquivo (sem a extensão .json)
+                base_name = os.path.splitext(filename)[0]
+                # 2. Gera o timestamp único
+                timestamp_unico = get_unique_timestamp()
+                
+                # 3. Monta o novo nome do objeto no MinIO: PREFIXO/base_name_TIMESTAMP.json
+                # Exemplo: json_vendas/dados_extrato_20251027_221005123456.json
+                object_name = f"{PREFIXO_MINIO}{base_name}_{timestamp_unico}.json"
+                # ----------------------------------------
 
-        # --- 5. FAZ O UPLOAD DO OBJETO ---
-        print(f"Iniciando upload do objeto '{OBJECT_NAME}' para o bucket '{BUCKET_NAME}'...")
+                print(f"\nIniciando processamento do arquivo: {filename}")
+                
+                # --- 5. LÊ O CONTEÚDO DO ARQUIVO LOCAL ---
+                try:
+                    with open(local_file_path, 'rb') as file_data:
+                        file_bytes = file_data.read()
+                        data_length = len(file_bytes)
+                        json_stream = io.BytesIO(file_bytes)
+                    
+                except FileNotFoundError:
+                    print(f"AVISO: Arquivo {filename} não encontrado. Pulando.")
+                    continue
+                
+                # --- 6. FAZ O UPLOAD DO OBJETO ---
+                print(f"Upload: '{object_name}' (Tamanho: {data_length} bytes)")
 
-        result = client.put_object(
-            bucket_name=BUCKET_NAME,
-            object_name=OBJECT_NAME,
-            data=json_stream,
-            length=data_length,
-            content_type=CONTENT_TYPE
-        )
+                result = client.put_object(
+                    bucket_name=BUCKET_NAME,
+                    object_name=object_name,
+                    data=json_stream,
+                    length=data_length,
+                    content_type=CONTENT_TYPE
+                )
+                
+                uploaded_count += 1
+                print(f"UPLOAD OK! Objeto: {result.object_name}")
 
-        print("\n--- UPLOAD CONCLUÍDO ---")
-        print(f"Objeto: {result.object_name}")
-        print(f"ETag: {result.etag}")
-        print(f"Localização: {BUCKET_NAME}/{OBJECT_NAME}")
+        print(f"\n--- RESUMO: {uploaded_count} ARQUIVO(S) JSON ENVIADO(S) COM NOMES ÚNICOS ---")
 
     except S3Error as err:
-        print(f"Erro ao interagir com o MinIO: {err}")
+        print(f"ERRO S3 ao interagir com o MinIO: {err}")
     except Exception as e:
-        print(f"Ocorreu um erro: {e}")
+        print(f"OCORREU UM ERRO INESPERADO: {e}")
 
 if __name__ == "__main__":
-    upload_json_to_minio()
+    upload_json_files_to_minio_unique()
