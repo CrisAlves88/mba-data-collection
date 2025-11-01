@@ -49,8 +49,8 @@ def main():
     # 3. Definir nome do bucket e do objeto
     #bucket_name = "meu-bucket-teste"
     #object_name = "teste.txt"
-    bucket_name = "silver"
-    object_name = "silver.txt"
+    bucket_name = "bronze"
+    object_name = "bronze.txt"
     #bucket_name = "trusted"
     #object_name = "trusted.txt"
     

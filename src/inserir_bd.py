@@ -26,22 +26,24 @@ MINIO_ENDPOINT = "minio:9000"
 MINIO_ACCESS_KEY = "minioadmin"
 MINIO_SECRET_KEY = "minioadmin"
 MINIO_SECURE = False
-BUCKET_NAME = "bronze"  # <- Variável global definida aqui!
+BUCKET_NAME = "bronze2"  # <- Variável global definida aqui!
 
 # --- 3. TABELAS A SEREM INGERIDAS ---
 DB_SCHEMA = "db_loja"
 TABELAS_PARA_INGESTAO = [
     "categorias_produto",
-    "produto", 
     "cliente",
-    "pedido_cabeca"
+    "pedido_cabecalho",
+    "pedido_itens",
+    "produto"
+    
 ]
 
 # --- 4. FUNÇÕES DE SUPORTE ---
 def get_unique_timestamp():
     """Gera um timestamp único (YYYYMMDD_HHMMSS_micros) para o nome da pasta."""
     agora = datetime.datetime.now()
-    return agora.strftime('%Y%m%d_%H%M%S') + str(int(time.time() * 1000) % 1000000)
+    return agora.strftime('%Y%m%d_%H%M%S') #+ str(int(time.time() * 1000) % 1000000)
 
 def ingest_full_load(spark_session: SparkSession, table_name: str, target_base_path: str):
     """
